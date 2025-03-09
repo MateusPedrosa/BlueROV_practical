@@ -14,6 +14,7 @@ from mavros_msgs.msg import OverrideRCIn, Mavlink
 from mavros_msgs.srv import EndpointAdd
 from geometry_msgs.msg import Twist
 from time import sleep
+from rclpy.clock import Clock
 
 
 # from waterlinked_a50_ros_driver.msg import DVL
@@ -103,12 +104,28 @@ class MyPythonNode(Node):
 
         # Control parameters
         self.Kp = 0.1
+        self.Ki = 0
+        self.integral_error = 0
 
         # PWM to thrust conversion parameters
         self.pwm_pos_intercept = 1541.31
         self.pwm_pos_slope = 10.38
         self.pwm_neg_intercept = 1433.68
         self.pwn_neg_slope = 11.88
+
+        # Cubic trajectory parameters
+        self.z_init = 0 # meters
+        self.z_final = 0.5 # meters
+        self.t_final = 20 # seconds
+
+        # Create a clock object
+        self.clock = self.get_clock()
+        
+        # Initialize the initial time
+        self.initial_time = self.clock.now().to_msg().sec
+
+        # Initialize the last received time for the relative altitude callback
+        self.last_rel_alt_time = None
         
     def initialization_test(self):
         """Tests the light by flashing it and tests the camera servo by moving it to max/min limits before starting the sytsem."""
@@ -473,26 +490,63 @@ class MyPythonNode(Node):
         # Implement the control logic to maintain the vehicle at the same depth  
         # as when depth hold mode was activated (depth_p0).
 
+        current_time = self.clock.now().to_msg().sec + self.clock.now().to_msg().nanosec * 1e-9  # Get current time in seconds
+
+        # Calculate the time difference between the current and last received relative altitude messages for integral control
+        dt = 0
+        if self.last_rel_alt_time is not None:
+            dt = current_time - self.last_rel_alt_time
+            sampling_rate = 1.0 / dt
+            self.get_logger().info(f"Sampling rate: {sampling_rate:.2f} Hz")
+
+        self.last_rel_alt_time = current_time  # Update the last received time
+
         if (self.init_p0):
             # 1st execution, init
-            self.depth_p0 = data
+            # self.depth_p0 = data
+            self.z_init = data
+            self.initial_time = current_time
+            self.integral_error = 0
             self.init_p0 = False
         
+        self.depth_p0, _ = self.cubic_trajectory()
         ## set servo depth control here
 
-        # Proportional controller
+        # # Proportional controller
         # error = self.depth_p0 - data
-        # Correction_depth = self.Kp * error
+        # correction_depth = self.Kp * error
         
-        # Proportional controller with floatability compensation
+        # # Proportional controller with floatability compensation
+        # error = self.depth_p0 - data
+        # correction_depth = self.Kp * error + self.flotability
+
+        # Proportional Integral controller
         error = self.depth_p0 - data
-        Correction_depth = self.Kp * error + self.flotability
+        self.integral_error += error * dt
+        correction_depth = self.Kp * error + self.Ki * self.integral_error + self.flotability
 
         # update Correction_depth
-        Correction_depth = self.thrust_to_pwm(Correction_depth)
+        correction_depth = self.thrust_to_pwm(correction_depth)
 
         # Send PWM commands to motors in timer
-        self.Correction_depth = Correction_depth
+        self.Correction_depth = correction_depth
+
+    def cubic_trajectory(self):
+        # Get the current time as a rclpy.time.Time object
+        current_time = self.clock.now().to_msg()
+        t = (current_time.sec + current_time.nanosec * 1e-9) - self.initial_time
+
+        a2 = (3*(self.z_final - self.z_init)) / self.t_final**2
+        a3 = (-2*(self.z_final - self.z_init)) / self.t_final**3
+
+        if t < self.t_final:
+            z_des = self.z_init + a2*t**2 + a3*t**3
+            z_dot_des = self.z_init + 2*a2*t + 3*a3*t**2
+        else:
+            z_des = self.z_final
+            z_dot_des = 0
+
+        return z_des, z_dot_des
 
     # def DvlCallback(self, data):
     #     u = data.velocity.x  # Linear surge velocity
