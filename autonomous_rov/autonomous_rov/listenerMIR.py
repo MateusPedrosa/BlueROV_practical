@@ -68,6 +68,7 @@ class MyPythonNode(Node):
         self.angle_yaw_a0 = 0.0
         self.depth_wrt_startup = 0
         self.depth_p0 = 0
+        self.z_des = self.depth_p0
 
         self.pinger_confidence = 0
         self.pinger_distance = 0
@@ -509,7 +510,7 @@ class MyPythonNode(Node):
 
         if (self.init_p0):
             # 1st execution, init
-            # self.depth_p0 = data
+            self.depth_p0 = data
             self.z_init = data
             self.initial_time = current_time
             self.integral_error = 0
@@ -517,48 +518,35 @@ class MyPythonNode(Node):
             self.w = 0  # Initialize the heave estimate
             self.init_p0 = False
         
-        self.depth_p0, w_des = self.cubic_trajectory()
+        # Uncomment the following line to maintain the initial depth when depth hold mode was activated
+        # self.z_des = self.depth_p0
+
+        # Uncomment the following line to use cubic trajectory for depth control
+        self.z_des, w_des = self.cubic_trajectory()
 
         ## set servo depth control here
 
         # # Proportional controller
-        # error = self.depth_p0 - data
+        # error = self.z_des - data
         # correction_depth = self.Kp * error
         
         # # Proportional controller with floatability compensation
-        # error = self.depth_p0 - data
+        # error = self.z_des - data
         # correction_depth = self.Kp * error + self.flotability
 
         # # Proportional Integral controller
-        # error = self.depth_p0 - data
+        # error = self.z_des - data
         # self.integral_error += error * dt
         # correction_depth = self.Kp * error + self.Ki * self.integral_error + self.flotability
 
+        # Estimate the heave velocity using alpha-beta filter
+        self.estimate_heave(dt)
+
         # PID controller
-        error = self.depth_p0 - data
+        error = self.z_des - data
         self.integral_error += error * dt
         self.derivative_error = w_des - self.w
         correction_depth = self.Kp * error + self.Ki * self.integral_error + self.Kd * self.derivative_error + self.flotability
-
-        # Generate a random input signal for testing
-        xm = random.randint(0, 99)
-
-        # Update depth and heave estimates
-        if dt > 0:
-            self.z += self.w * dt  # Update depth estimate
-
-            r = xm - self.z  # Calculate residual
-
-            self.z += self.alpha * r  # Update depth estimate with residual correction
-            self.w += (self.beta * r) / dt  # Update heave estimate with residual correction
-
-        # Publish the estimated heave velocity
-        Vel = Twist()
-        Vel.linear.z = self.w
-        self.pub_linear_velocity.publish(Vel)
-
-        # Publish the estimated depth
-        self.pub_depth.publish(self.z)
 
         # update Correction_depth
         correction_depth = self.thrust_to_pwm(correction_depth)
@@ -567,6 +555,18 @@ class MyPythonNode(Node):
         self.Correction_depth = correction_depth
 
     def cubic_trajectory(self):
+        """
+        Generates a cubic trajectory for depth control.
+
+        This function calculates the desired depth (z_des) and the desired heave velocity (z_dot_des)
+        based on a cubic polynomial trajectory. The trajectory is defined by the initial depth (z_init),
+        the final depth (z_final), and the total time to reach the final depth (t_final).
+
+        Returns:
+            tuple: A tuple containing:
+                - z_des (float): The desired depth at the current time.
+                - z_dot_des (float): The desired heave_velocity at the current time.
+        """
         # Get the current time as a rclpy.time.Time object
         current_time = self.clock.now().to_msg()
         t = (current_time.sec + current_time.nanosec * 1e-9) - self.initial_time
@@ -582,6 +582,39 @@ class MyPythonNode(Node):
             z_dot_des = 0
 
         return z_des, z_dot_des
+    
+    def estimate_heave(self, dt):
+        """
+        Estimate the heave (vertical motion) of the ROV based on the time delta dt.
+        This function updates the depth and heave estimates using an alpha-beta filter
+        and publishes the estimated heave velocity and depth.
+        Args:
+            dt (float): The time delta since the last update. If dt is zero or None,
+                        the function will return immediately without updating.
+        Returns:
+            None
+        """
+        if not dt:
+            return
+        
+        # Generate a random input signal for testing
+        xm = random.randint(0, 99)
+
+        # Update depth and heave estimates
+        self.z += self.w * dt  # Update depth estimate
+
+        r = xm - self.z  # Calculate residual
+
+        self.z += self.alpha * r  # Update depth estimate with residual correction
+        self.w += (self.beta * r) / dt  # Update heave estimate with residual correction
+
+        # Publish the estimated heave velocity
+        Vel = Twist()
+        Vel.linear.z = self.w
+        self.pub_linear_velocity.publish(Vel)
+
+        # Publish the estimated depth
+        self.pub_depth.publish(self.z)
 
     # def DvlCallback(self, data):
     #     u = data.velocity.x  # Linear surge velocity
