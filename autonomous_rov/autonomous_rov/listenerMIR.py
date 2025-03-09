@@ -557,6 +557,9 @@ class MyPythonNode(Node):
         Vel.linear.z = self.w
         self.pub_linear_velocity.publish(Vel)
 
+        # Publish the estimated depth
+        self.pub_depth.publish(self.z)
+
         # update Correction_depth
         correction_depth = self.thrust_to_pwm(correction_depth)
 
