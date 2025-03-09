@@ -99,11 +99,12 @@ class MyPythonNode(Node):
         
         ## TODO ##
         # Task 1 : Calculate the flotability of the ROV
-        self.flotability = None
+        self.flotability = 0
 
-        # Control parameters
+        # PID control parameters
         self.Kp = 0.1
         self.Ki = 0
+        self.Kd = 0
         self.integral_error = 0
 
         # PWM to thrust conversion parameters
@@ -516,7 +517,8 @@ class MyPythonNode(Node):
             self.w = 0  # Initialize the heave estimate
             self.init_p0 = False
         
-        self.depth_p0, _ = self.cubic_trajectory()
+        self.depth_p0, w_des = self.cubic_trajectory()
+
         ## set servo depth control here
 
         # # Proportional controller
@@ -527,10 +529,16 @@ class MyPythonNode(Node):
         # error = self.depth_p0 - data
         # correction_depth = self.Kp * error + self.flotability
 
-        # Proportional Integral controller
+        # # Proportional Integral controller
+        # error = self.depth_p0 - data
+        # self.integral_error += error * dt
+        # correction_depth = self.Kp * error + self.Ki * self.integral_error + self.flotability
+
+        # PID controller
         error = self.depth_p0 - data
         self.integral_error += error * dt
-        correction_depth = self.Kp * error + self.Ki * self.integral_error + self.flotability
+        self.derivative_error = w_des - self.w
+        correction_depth = self.Kp * error + self.Ki * self.integral_error + self.Kd * self.derivative_error + self.flotability
 
         # Generate a random input signal for testing
         xm = random.randint(0, 99)
