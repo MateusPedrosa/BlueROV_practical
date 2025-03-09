@@ -14,8 +14,7 @@ from mavros_msgs.msg import OverrideRCIn, Mavlink
 from mavros_msgs.srv import EndpointAdd
 from geometry_msgs.msg import Twist
 from time import sleep
-from rclpy.clock import Clock
-
+import random
 
 # from waterlinked_a50_ros_driver.msg import DVL
 # from waterlinked_a50_ros_driver.msg import DVLBeam
@@ -126,6 +125,12 @@ class MyPythonNode(Node):
 
         # Initialize the last received time for the relative altitude callback
         self.last_rel_alt_time = None
+
+        # Initialize the state and velocity estimates
+        self.z = 0
+        self.w = 0
+        self.alpha = 0.1
+        self.beta = 0.005
         
     def initialization_test(self):
         """Tests the light by flashing it and tests the camera servo by moving it to max/min limits before starting the sytsem."""
@@ -507,6 +512,8 @@ class MyPythonNode(Node):
             self.z_init = data
             self.initial_time = current_time
             self.integral_error = 0
+            self.z = data  # Initialize the depth estimate
+            self.w = 0  # Initialize the heave estimate
             self.init_p0 = False
         
         self.depth_p0, _ = self.cubic_trajectory()
@@ -524,6 +531,23 @@ class MyPythonNode(Node):
         error = self.depth_p0 - data
         self.integral_error += error * dt
         correction_depth = self.Kp * error + self.Ki * self.integral_error + self.flotability
+
+        # Generate a random input signal for testing
+        xm = random.randint(0, 99)
+
+        # Update depth and heave estimates
+        if dt > 0:
+            self.z += self.w * dt  # Update depth estimate
+
+            r = xm - self.z  # Calculate residual
+
+            self.z += self.alpha * r  # Update depth estimate with residual correction
+            self.w += (self.beta * r) / dt  # Update heave estimate with residual correction
+
+        # Publish the estimated heave velocity
+        Vel = Twist()
+        Vel.linear.z = self.w
+        self.pub_linear_velocity.publish(Vel)
 
         # update Correction_depth
         correction_depth = self.thrust_to_pwm(correction_depth)
