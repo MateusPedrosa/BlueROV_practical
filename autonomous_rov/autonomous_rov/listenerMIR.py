@@ -103,6 +103,12 @@ class MyPythonNode(Node):
 
         # Control parameters
         self.Kp = 0.1
+
+        # PWM to thrust conversion parameters
+        self.pwm_pos_intercept = 1541.31
+        self.pwm_pos_slope = 10.38
+        self.pwm_neg_intercept = 1433.68
+        self.pwn_neg_slope = 11.88
         
     def initialization_test(self):
         """Tests the light by flashing it and tests the camera servo by moving it to max/min limits before starting the sytsem."""
@@ -542,9 +548,11 @@ class MyPythonNode(Node):
             int: PWM value corresponding to the thrust, limited to the range [1100, 1900] to avoid saturation.
         """
         if thrust > 0:
-            pulse_width = 10.38*thrust + 1541.31
+            pulse_width = self.pwm_pos_slope*thrust + self.pwm_pos_intercept
+        elif thrust < 0:
+            pulse_width = self.pwn_neg_slope*thrust + self.pwm_neg_intercept
         else:
-            pulse_width = 11.88*thrust + 1433.68
+            pulse_width = 1500 # Neutral PWM signal for no force
 
         # Saturation
         if pulse_width > 1900:
